@@ -1,0 +1,206 @@
+import boto3
+import pandas as pd
+from io import StringIO
+
+# Initialize a session using Amazon S3
+s3 = boto3.client('s3')
+
+# Define the S3 bucket and object (file) key
+bucket_name = 'fetching-historical-data'
+
+# List of file keys
+file_keys = [
+    '1-3000.csv','12001-15635.csv','15637-18637.csv','18637-21636.csv',
+    '21637:24637.csv','24637:27637.csv','27637:31276.csv','3001-6000.csv',
+    '31276-36276.csv','36277:41276.csv','41277:46912.csv','6001-9000.csv',
+    '9001-12000.csv'
+]
+
+# Loop through the file keys and read the CSV files
+for i, file_key in enumerate(file_keys):
+    try:
+        response = s3.get_object(Bucket=bucket_name, Key=file_key)
+        csv_content = response['Body'].read().decode('utf-8')
+        data_io = StringIO(csv_content)
+        globals()[f'df{i+1}'] = pd.read_csv(data_io)
+        print(globals()[f'df{i+1}'])
+    except Exception as e:
+        print(f"Error reading {file_key}: {e}")
+        
+        
+# Specify the date format explicitly if you know it
+date_format = '%Y-%m-%d'  # Update this format to match your date format
+
+# Initialize empty lists to store combined data for each year range
+combined_df_2006_2011 = []
+combined_df_2012_2015 = []
+combined_df_2016_2019 = []
+combined_df_2020_2022 = []
+combined_df_2023_2024 = []
+
+for i in range(1, 14):
+    df_i = eval(f'df{i}').copy()  # Create a copy of the data frame
+    
+    if 'date' not in df_i.columns:
+        print(f"'date' column missing in df{i}")
+        continue
+    
+    df_i['date'] = pd.to_datetime(df_i['date'])  # Specify the date format
+    df_i['year'] = df_i['date'].dt.year
+
+    filtered_df1_2006_2011 = df_i[(df_i['year'] >= 2006) & (df_i['year'] <= 2011)]
+    combined_df_2006_2011.append(filtered_df1_2006_2011)
+
+    filtered_df1_2012_2015 = df_i[(df_i['year'] >= 2012) & (df_i['year'] <= 2015)]
+    combined_df_2012_2015.append(filtered_df1_2012_2015)
+
+    filtered_df1_2016_2019 = df_i[(df_i['year'] >= 2016) & (df_i['year'] <= 2019)]
+    combined_df_2016_2019.append(filtered_df1_2016_2019)
+
+    filtered_df1_2020_2022 = df_i[(df_i['year'] >= 2020) & (df_i['year'] <= 2022)]
+    combined_df_2020_2022.append(filtered_df1_2020_2022)
+
+    filtered_df1_2023_2024 = df_i[(df_i['year'] >= 2023) & (df_i['year'] <= 2024)]
+    combined_df_2023_2024.append(filtered_df1_2023_2024)
+
+# Concatenate all data frames for each year range
+combined_df_2006_2011 = pd.concat(combined_df_2006_2011, ignore_index=True)
+combined_df_2012_2015 = pd.concat(combined_df_2012_2015, ignore_index=True)
+combined_df_2016_2019 = pd.concat(combined_df_2016_2019, ignore_index=True)
+combined_df_2020_2022 = pd.concat(combined_df_2020_2022, ignore_index=True)
+combined_df_2023_2024 = pd.concat(combined_df_2023_2024, ignore_index=True)
+
+
+def clean_text(scheme):
+    if 'Mutual Fund' in scheme:
+        return 'Mutual Fund'
+    elif 'Open Ended' in scheme:
+        return 'Open Ended Scheme'
+    elif 'Close Ended' in scheme:
+        return 'Close Ended Scheme'
+    elif 'Interval Fund' in scheme:
+        return 'Interval Fund'
+    elif 'Debt' in scheme or 'FMP' in scheme:
+        return 'Debt Scheme'
+    elif 'Hybrid' in scheme:
+        return 'Hybrid Scheme'
+    elif 'Equity' in scheme:
+        return 'Equity Scheme'
+    elif 'Index Fund' in scheme:
+        return 'Index Fund'
+    elif 'Liquid' in scheme or 'Ultra Short Duration' in scheme:
+        return 'Liquid/Ultra Short Duration Fund'
+    elif 'Plan' in scheme or 'Days' in scheme:
+        return 'Plan/Duration'
+    else:
+        return 'Uncategorized'
+
+
+def categorize4(scheme):
+    if 'EQUITY SCHEME' in scheme:
+        return 'EQUITY SCHEME'
+    elif 'DEBT SCHEME' in scheme:
+        return 'DEBT SCHEME'
+    elif 'HYBRID SCHEME' in scheme:
+        return 'HYBRID SCHEMES'
+    elif 'SOLUTION ORIENTED SCHEME - RETIREMENT FUND' in scheme:
+        return 'SOLUTION ORIENTED SCHEME RETIREMENT'
+    elif 'SOLUTION ORIENTED SCHEME - CHILDREN’S FUND' in scheme:
+        return 'SOLUTION ORIENTED SCHEME CHILDREN'
+    elif 'OTHER SCHEME' in scheme:
+        return 'OTHERS'
+    elif 'FORMERLY SUPER INSTITUTIONAL PLAN' in scheme:
+        return 'FORMERLY SUPER INSTITUTIONAL PLAN'
+    elif 'FORMERLY KNOWN AS IIFL MUTUAL FUND' in scheme:
+        return 'FORMERLY KNOWN AS IIFL MUTUAL FUND'
+    elif any(keyword in scheme for keyword in ['DAYS', 'PLAN', 'DAILY', 'HALF YEARLY', 'ANNUAL', 'COMPULSORY']):
+        return 'DURATION/PLAN'
+    elif 'DIRECT' in scheme or 'PAYOUT' in scheme:
+        return 'DIRECT/PAYOUT'
+    elif 'IDF' in scheme or 'GROWTH' in scheme or 'LIQUID' in scheme:
+        return 'IDF/GROWTH/LIQUID'
+    else:
+        return 'MISCELLANEOUS'
+        
+        
+
+# Define a function to process each DataFrame
+def process_df(df):
+    df = df.drop(['year'], axis=1)
+    df = df.groupby(['date', 'nav', 'fund_house', 'scheme_type', 'scheme_category', 'scheme_code', 'scheme_name']).size().reset_index(name='count')
+    df = df.drop('count', axis=1)
+    df['scheme_category'] = df['scheme_category'].str.upper()
+    df['scheme_category'] = df['scheme_category'].apply(categorize4)
+    df['scheme_type'] = df['scheme_type'].apply(clean_text)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+    return df
+
+# Process each DataFrame and update the original variables
+combined_df_2006_2011 = process_df(combined_df_2006_2011)
+combined_df_2012_2015 = process_df(combined_df_2012_2015)
+combined_df_2016_2019 = process_df(combined_df_2016_2019)
+combined_df_2020_2022 = process_df(combined_df_2020_2022)
+combined_df_2023_2024 = process_df(combined_df_2023_2024)
+
+combined_df_2006_2011['nav'] = combined_df_2006_2011['nav'].round(2)
+combined_df_2012_2015['nav'] = combined_df_2012_2015['nav'].round(2)
+combined_df_2016_2019['nav'] = combined_df_2016_2019['nav'].round(2)
+combined_df_2020_2022['nav'] = combined_df_2020_2022['nav'].round(2)
+combined_df_2023_2024['nav'] = combined_df_2023_2024['nav'].round(2)
+
+
+s3 = boto3.client('s3')
+bucket_name = 'cleaned-capstone-bucket'
+
+# for 1st file
+file_key1 = 'combined_df_2006_2011_cleaned.csv'
+
+csv_buffer = StringIO()
+combined_df_2006_2011.to_csv(csv_buffer, index=False)
+
+# Upload CSV string to S3
+s3.put_object(Bucket=bucket_name, Key=file_key1, Body=csv_buffer.getvalue())
+
+# for 2nd file
+
+file_key2 = 'combined_df_2012_2015_cleaned.csv'
+
+csv_buffer = StringIO()
+combined_df_2012_2015.to_csv(csv_buffer, index=False)
+
+# Upload CSV string to S3
+s3.put_object(Bucket=bucket_name, Key=file_key2, Body=csv_buffer.getvalue())
+
+
+# for 3rd file
+
+file_key3 = 'combined_df_2016_2019_cleaned.csv'
+
+csv_buffer = StringIO()
+combined_df_2016_2019.to_csv(csv_buffer, index=False)
+
+# Upload CSV string to S3
+s3.put_object(Bucket=bucket_name, Key=file_key3, Body=csv_buffer.getvalue())
+
+
+# for 4rth file
+file_key4 = 'combined_df_2020_2022_cleaned.csv'
+
+csv_buffer = StringIO()
+combined_df_2020_2022.to_csv(csv_buffer, index=False)
+
+# Upload CSV string to S3
+s3.put_object(Bucket=bucket_name, Key=file_key4, Body=csv_buffer.getvalue())
+
+
+# for 5th file
+file_key5 = 'combined_df_2023_2024_cleaned.csv'
+
+csv_buffer = StringIO()
+combined_df_2023_2024.to_csv(csv_buffer, index=False)
+
+# Upload CSV string to S3
+s3.put_object(Bucket=bucket_name, Key=file_key5, Body=csv_buffer.getvalue())
+
+
+
